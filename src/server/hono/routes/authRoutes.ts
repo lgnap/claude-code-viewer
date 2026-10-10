@@ -41,14 +41,13 @@ const authRoutes = Effect.gen(function* () {
         );
       }
 
-      const throttleCheck = await runPromise(throttle.check);
-      if (!throttleCheck.allowed) {
-        c.header("Retry-After", String(Math.ceil(throttleCheck.retryAfterMs / 1000)));
+      const attempt = await runPromise(throttle.beginAttempt);
+      if (!attempt.allowed) {
+        c.header("Retry-After", String(Math.ceil(attempt.retryAfterMs / 1000)));
         return c.json({ error: "Too many failed attempts" }, 429);
       }
 
       if (authPassword === undefined || !safeEqual(password, authPassword)) {
-        await runPromise(throttle.recordFailure);
         return c.json({ error: "Invalid password" }, 401);
       }
       await runPromise(throttle.recordSuccess);

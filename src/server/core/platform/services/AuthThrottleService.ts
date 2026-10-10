@@ -30,34 +30,39 @@ const isExpired = (state: ThrottleState, now: number): boolean =>
 const LayerImpl = Effect.gen(function* () {
   const stateRef = yield* Ref.make<ThrottleState>(initialState);
 
-  const check: Effect.Effect<ThrottleCheck> = Effect.gen(function* () {
+  /**
+   * Admit a password attempt. Admission and counting happen in one atomic update so that
+   * concurrent attempts cannot all slip through before any failure is recorded: an admitted
+   * attempt is provisionally counted as a failure until `recordSuccess` releases it.
+   * Refused attempts are not counted, so hammering a locked service does not extend the delay.
+   */
+  const beginAttempt: Effect.Effect<ThrottleCheck> = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
-    const state = yield* Ref.get(stateRef);
-    if (isExpired(state, now)) return { allowed: true };
+    const [result, engagedLockout] = yield* Ref.modify(
+      stateRef,
+      (current): [[ThrottleCheck, boolean], ThrottleState] => {
+        const state = isExpired(current, now) ? initialState : current;
+        const retryAfterMs = state.lastFailureAt + delayFor(state.failures) - now;
+        if (retryAfterMs > 0) {
+          return [[{ allowed: false, retryAfterMs }, false], state];
+        }
+        const failures = state.failures + 1;
+        return [[{ allowed: true }, failures === FREE_FAILURES], { failures, lastFailureAt: now }];
+      },
+    );
 
-    const retryAfterMs = state.lastFailureAt + delayFor(state.failures) - now;
-    return retryAfterMs > 0 ? { allowed: false, retryAfterMs } : { allowed: true };
-  });
-
-  const recordFailure = Effect.gen(function* () {
-    const now = yield* Clock.currentTimeMillis;
-    const state = yield* Ref.updateAndGet(stateRef, (current) => ({
-      failures: (isExpired(current, now) ? 0 : current.failures) + 1,
-      lastFailureAt: now,
-    }));
-
-    if (state.failures === FREE_FAILURES) {
+    if (engagedLockout) {
       yield* Effect.logWarning(
-        `Authentication lockout engaged after ${state.failures} consecutive failed password attempts`,
+        `Authentication lockout engaged after ${FREE_FAILURES} consecutive failed password attempts`,
       );
     }
+    return result;
   });
 
   const recordSuccess = Ref.set(stateRef, initialState);
 
   return {
-    check,
-    recordFailure,
+    beginAttempt,
     recordSuccess,
   };
 });

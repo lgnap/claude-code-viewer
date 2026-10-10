@@ -65,16 +65,16 @@ const createAuthRequiredMiddleware = (
 
     // A bearer token is the raw password, so a wrong one is a password guess: throttle it.
     if (bearerToken !== undefined) {
-      const throttleCheck = await runPromise(throttle.check);
-      if (!throttleCheck.allowed) {
-        c.header("Retry-After", String(Math.ceil(throttleCheck.retryAfterMs / 1000)));
+      const attempt = await runPromise(throttle.beginAttempt);
+      if (!attempt.allowed) {
+        c.header("Retry-After", String(Math.ceil(attempt.retryAfterMs / 1000)));
         return c.json({ error: "Too many failed attempts" }, 429);
       }
 
       if (authPassword !== undefined && safeEqual(bearerToken, authPassword)) {
+        await runPromise(throttle.recordSuccess);
         return next();
       }
-      await runPromise(throttle.recordFailure);
     }
 
     return c.json({ error: "Unauthorized" }, 401);
