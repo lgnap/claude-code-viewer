@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertLoginSucceeded } from "./loginResponse";
+import { assertLoginSucceeded } from "@/web/components/loginResponse";
 
 const jsonResponse = (status: number, body: unknown, headers?: Record<string, string>) =>
   new Response(JSON.stringify(body), {

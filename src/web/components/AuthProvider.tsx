@@ -3,9 +3,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { type FC, type PropsWithChildren, useEffect } from "react";
 import { authAtom } from "@/lib/auth/store/authAtom";
+import { assertLoginSucceeded } from "@/web/components/loginResponse";
 import { honoClient } from "@/web/lib/api/client";
 import { authCheckQuery } from "@/web/lib/api/queries";
-import { assertLoginSucceeded } from "./loginResponse";
 
 export const AuthProvider: FC<PropsWithChildren> = ({ children }) => {
   const setAuthState = useSetAtom(authAtom);
