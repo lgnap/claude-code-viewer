@@ -75,6 +75,8 @@ const createAuthRequiredMiddleware = (
         await runPromise(throttle.recordSuccess);
         return next();
       }
+
+      await runPromise(throttle.recordFailure);
     }
 
     return c.json({ error: "Unauthorized" }, 401);

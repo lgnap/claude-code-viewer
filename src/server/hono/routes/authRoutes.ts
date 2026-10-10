@@ -48,6 +48,7 @@ const authRoutes = Effect.gen(function* () {
       }
 
       if (authPassword === undefined || !safeEqual(password, authPassword)) {
+        await runPromise(throttle.recordFailure);
         return c.json({ error: "Invalid password" }, 401);
       }
       await runPromise(throttle.recordSuccess);

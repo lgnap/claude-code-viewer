@@ -1,11 +1,28 @@
-import { Effect, Layer, TestClock, TestContext } from "effect";
+import { Effect, Layer, Logger, TestClock, TestContext } from "effect";
 import { describe, expect, test } from "vitest";
+import { testPlatformLayer } from "../../../../testing/layers/testPlatformLayer.ts";
 import { AuthThrottleService } from "./AuthThrottleService.ts";
 
-const testLayer = Layer.provideMerge(AuthThrottleService.Live, TestContext.TestContext);
+const testLayer = Layer.provideMerge(
+  AuthThrottleService.Live,
+  Layer.mergeAll(testPlatformLayer(), TestContext.TestContext),
+);
 
 const run = <A, E>(effect: Effect.Effect<A, E, AuthThrottleService>) =>
   Effect.runPromise(effect.pipe(Effect.provide(testLayer)));
+
+// Runs the effect while capturing every log message it emits, so tests can assert
+// whether a lockout warning was (or was not) reported.
+const runCollectingLogs = <A, E>(effect: Effect.Effect<A, E, AuthThrottleService>) => {
+  const messages: string[] = [];
+  const capturingLogger = Logger.make(({ message }) => {
+    messages.push(typeof message === "string" ? message : JSON.stringify(message));
+  });
+
+  return run(
+    effect.pipe(Effect.provide(Logger.replace(Logger.defaultLogger, capturingLogger))),
+  ).then(() => messages);
+};
 
 // Simulates an attacker: an attempt that is admitted and never released counts as a failure;
 // when refused, wait out the delay and try again.
@@ -137,6 +154,32 @@ describe("AuthThrottleService", () => {
     );
 
     expect(result).toEqual({ allowed: true });
+  });
+
+  test("logs a lockout when the attempt reaching the threshold fails", async () => {
+    const messages = await runCollectingLogs(
+      Effect.gen(function* () {
+        const service = yield* AuthThrottleService;
+        yield* recordFailures(4);
+        yield* service.beginAttempt;
+        yield* service.recordFailure;
+      }),
+    );
+
+    expect(messages.filter((message) => message.includes("lockout engaged"))).toHaveLength(1);
+  });
+
+  test("does not log a lockout when the fifth attempt succeeds", async () => {
+    const messages = await runCollectingLogs(
+      Effect.gen(function* () {
+        const service = yield* AuthThrottleService;
+        yield* recordFailures(4);
+        yield* service.beginAttempt;
+        yield* service.recordSuccess;
+      }),
+    );
+
+    expect(messages.filter((message) => message.includes("lockout engaged"))).toHaveLength(0);
   });
 
   test("forgets failures older than 15 minutes", async () => {

@@ -38,32 +38,37 @@ const LayerImpl = Effect.gen(function* () {
    */
   const beginAttempt: Effect.Effect<ThrottleCheck> = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
-    const [result, engagedLockout] = yield* Ref.modify(
-      stateRef,
-      (current): [[ThrottleCheck, boolean], ThrottleState] => {
-        const state = isExpired(current, now) ? initialState : current;
-        const retryAfterMs = state.lastFailureAt + delayFor(state.failures) - now;
-        if (retryAfterMs > 0) {
-          return [[{ allowed: false, retryAfterMs }, false], state];
-        }
-        const failures = state.failures + 1;
-        return [[{ allowed: true }, failures === FREE_FAILURES], { failures, lastFailureAt: now }];
-      },
-    );
-
-    if (engagedLockout) {
-      yield* Effect.logWarning(
-        `Authentication lockout engaged after ${FREE_FAILURES} consecutive failed password attempts`,
-      );
-    }
-    return result;
+    return yield* Ref.modify(stateRef, (current): [ThrottleCheck, ThrottleState] => {
+      const state = isExpired(current, now) ? initialState : current;
+      const retryAfterMs = state.lastFailureAt + delayFor(state.failures) - now;
+      if (retryAfterMs > 0) {
+        return [{ allowed: false, retryAfterMs }, state];
+      }
+      const failures = state.failures + 1;
+      return [{ allowed: true }, { failures, lastFailureAt: now }];
+    });
   });
 
   const recordSuccess = Ref.set(stateRef, initialState);
 
+  /**
+   * Confirm that an admitted attempt failed authentication. The failure is already counted by
+   * `beginAttempt`; this only reports the lockout, and only on the attempt that reached the
+   * threshold, so a valid password accepted on the fifth try never logs a false lockout.
+   */
+  const recordFailure: Effect.Effect<void> = Effect.gen(function* () {
+    const { failures } = yield* Ref.get(stateRef);
+    if (failures === FREE_FAILURES) {
+      yield* Effect.logWarning(
+        `Authentication lockout engaged after ${FREE_FAILURES} consecutive failed password attempts`,
+      );
+    }
+  });
+
   return {
     beginAttempt,
     recordSuccess,
+    recordFailure,
   };
 });
 
